@@ -13,6 +13,7 @@ from src.config import (
     MMPROJ_FILE,
     SERVER_HOST,
     SERVER_PORT,
+    LLAMA_SERVER_PORT,
     N_CTX,
     N_BATCH,
     N_PARALLEL,
@@ -29,7 +30,7 @@ class LlamaServerManager:
     def __init__(
         self,
         host: str = SERVER_HOST,
-        port: int = SERVER_PORT,
+        port: int = LLAMA_SERVER_PORT,
         n_ctx: int = N_CTX,
         n_batch: int = N_BATCH,
     ):

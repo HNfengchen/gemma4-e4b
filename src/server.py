@@ -9,13 +9,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
-from src.tools.client import GemmaClient, LlamaServerManager
+from src.tools.client import GemmaClient, LlamaServerManager, MCPManager
 from src.skills.builtin import register_builtin_skills
 from src.skills.registry import get_registry
 from src.config import SERVER_HOST, SERVER_PORT
 
 
-app = FastAPI(title="Gemma-4-E4B API Server", version="1.0.0")
+app = FastAPI(title="Gemma-4-E4B API Server", version="2.0.0")
 
 client: GemmaClient | None = None
 server_manager: LlamaServerManager | None = None
@@ -45,6 +45,12 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
 
 
+class MCPServerConfig(BaseModel):
+    name: str
+    command: list[str] | None = None
+    url: str | None = None
+
+
 @app.on_event("startup")
 async def startup():
     global client, server_manager
@@ -56,6 +62,8 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    if client:
+        client.close()
     if server_manager:
         server_manager.stop()
 
@@ -147,6 +155,30 @@ async def list_tools():
     if client is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
     return {"tools": client.executor.get_tools_schema()}
+
+
+@app.post("/v1/mcp/connect")
+async def connect_mcp(config: MCPServerConfig):
+    if client is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    try:
+        if config.command:
+            loaded = client.connect_mcp_stdio(config.name, config.command)
+        elif config.url:
+            loaded = client.connect_mcp_http(config.name, config.url)
+        else:
+            raise HTTPException(status_code=400, detail="Must provide 'command' or 'url'")
+        return {"status": "ok", "tools_loaded": loaded}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/skills/reload")
+async def reload_skills():
+    if client is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    loaded = client.reload_skills()
+    return {"status": "ok", "skills_loaded": loaded}
 
 
 @app.get("/health")

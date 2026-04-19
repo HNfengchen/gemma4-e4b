@@ -15,23 +15,27 @@ def main():
     print("\nRegistering skills...")
     register_builtin_skills()
     registry = get_registry()
-    print(f"Available skills: {', '.join(registry.list_skills())}")
+    print(f"Built-in skills: {', '.join(registry.list_skills())}")
 
-    print("\nStarting llama-server (this may take a moment)...")
+    print("\nStarting llama-server...")
     server = LlamaServerManager()
 
     try:
         server.start()
         client = GemmaClient(registry=registry, server_manager=server)
+        print(f"All skills: {', '.join(client.registry.list_skills())}")
         print("Ready!\n")
 
         messages: list[dict] = []
 
         print("Type your message and press Enter. Commands:")
-        print("  /tools  - List available tools")
-        print("  /clear  - Clear conversation history")
-        print("  /quit   - Exit")
-        print("  /raw    - Toggle raw tool call display")
+        print("  /tools    - List available tools")
+        print("  /clear    - Clear conversation history")
+        print("  /quit     - Exit")
+        print("  /raw      - Toggle raw tool call display")
+        print("  /reload   - Reload skill.md files from skills/ directory")
+        print("  /mcp      - Connect to MCP server (usage: /mcp <name> <command>)")
+        print("  /agents   - Show current AGENTS.md system prompt")
         print()
 
         show_raw = False
@@ -63,6 +67,31 @@ def main():
                 show_raw = not show_raw
                 print(f"Raw tool calls: {'ON' if show_raw else 'OFF'}")
                 continue
+            elif user_input == "/reload":
+                loaded = client.reload_skills()
+                print(f"Reloaded skills: {', '.join(loaded) if loaded else 'none'}")
+                print(f"All skills: {', '.join(client.registry.list_skills())}")
+                continue
+            elif user_input.startswith("/mcp "):
+                parts = user_input[5:].strip().split(None, 1)
+                if len(parts) < 2:
+                    print("Usage: /mcp <name> <command_or_url>")
+                    continue
+                name = parts[0]
+                cmd_or_url = parts[1]
+                try:
+                    if cmd_or_url.startswith("http"):
+                        loaded = client.connect_mcp_http(name, cmd_or_url)
+                    else:
+                        loaded = client.connect_mcp_stdio(name, cmd_or_url.split())
+                    print(f"MCP '{name}' connected. Tools: {', '.join(loaded) if loaded else 'none'}")
+                except Exception as e:
+                    print(f"MCP connection failed: {e}")
+                continue
+            elif user_input == "/agents":
+                print(f"System prompt ({len(client._system_prompt)} chars):")
+                print(client._system_prompt[:500] + ("..." if len(client._system_prompt) > 500 else ""))
+                continue
 
             messages.append({"role": "user", "content": user_input})
 
@@ -90,6 +119,7 @@ def main():
                 messages.append({"role": "assistant", "content": full_response})
 
     finally:
+        client.close()
         server.stop()
 
 

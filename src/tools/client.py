@@ -21,9 +21,14 @@ from src.config import (
     TOP_P,
     TOP_K,
     TOOL_CALL_MAX_ITERATIONS,
+    AGENTS_MD,
+    SKILLS_DIR,
+    MCP_CONFIG,
 )
 from src.tools.executor import ToolExecutor
 from src.skills.registry import SkillRegistry, get_registry
+from src.skills.skill_md import load_skills_from_directory
+from src.tools.mcp_client import MCPManager, load_mcp_config
 
 
 class LlamaServerManager:
@@ -110,21 +115,76 @@ class LlamaServerManager:
         self.stop()
 
 
+def _load_agents_md() -> str:
+    if AGENTS_MD.exists():
+        return AGENTS_MD.read_text(encoding="utf-8")
+    return (
+        "You are a helpful AI assistant with access to tools. "
+        "When you need to perform calculations, access files, execute code, "
+        "or fetch web content, use the available tools. "
+        "Always respond in the user's language."
+    )
+
+
+def _load_skill_md_files(registry: SkillRegistry) -> list[str]:
+    loaded: list[str] = []
+    for skill in load_skills_from_directory(SKILLS_DIR):
+        try:
+            registry.register(skill)
+            loaded.append(skill.name)
+        except ValueError:
+            registry.unregister(skill.name)
+            registry.register(skill)
+            loaded.append(skill.name)
+    return loaded
+
+
+def _load_mcp_servers(mcp_manager: MCPManager, registry: SkillRegistry) -> list[str]:
+    loaded: list[str] = []
+    config = load_mcp_config(str(MCP_CONFIG))
+    servers = config.get("mcpServers", {})
+    for name, server_conf in servers.items():
+        try:
+            if "command" in server_conf:
+                client = mcp_manager.add_stdio_server(name, server_conf["command"])
+            elif "url" in server_conf:
+                client = mcp_manager.add_http_server(name, server_conf["url"])
+            else:
+                continue
+            for skill in client.get_tool_skills():
+                try:
+                    registry.register(skill)
+                    loaded.append(skill.name)
+                except ValueError:
+                    registry.unregister(skill.name)
+                    registry.register(skill)
+                    loaded.append(skill.name)
+        except Exception as e:
+            print(f"[WARN] Failed to connect MCP server '{name}': {e}")
+    return loaded
+
+
 class GemmaClient:
     def __init__(
         self,
         registry: SkillRegistry | None = None,
         server_manager: LlamaServerManager | None = None,
+        mcp_manager: MCPManager | None = None,
     ):
-        self.executor = ToolExecutor(registry or get_registry())
+        self.registry = registry or get_registry()
+        self.executor = ToolExecutor(self.registry)
         self.server = server_manager or LlamaServerManager()
-        self._system_prompt = (
-            "You are a helpful AI assistant with access to tools. "
-            "When you need to perform calculations, access files, execute code, "
-            "or fetch web content, use the available tools. "
-            "Always respond in the user's language."
-        )
+        self.mcp_manager = mcp_manager or MCPManager()
+        self._system_prompt = _load_agents_md()
         self._session = requests.Session()
+
+        loaded_skills = _load_skill_md_files(self.registry)
+        if loaded_skills:
+            print(f"Loaded skill.md tools: {', '.join(loaded_skills)}")
+
+        loaded_mcp = _load_mcp_servers(self.mcp_manager, self.registry)
+        if loaded_mcp:
+            print(f"Loaded MCP tools: {', '.join(loaded_mcp)}")
 
     def _chat_completion(
         self,
@@ -230,7 +290,38 @@ class GemmaClient:
         response = self.chat(messages, **kwargs)
         return response["choices"][0]["message"].get("content", "")
 
+    def reload_skills(self) -> list[str]:
+        loaded = _load_skill_md_files(self.registry)
+        return loaded
+
+    def connect_mcp_stdio(self, name: str, command: list[str]) -> list[str]:
+        client = self.mcp_manager.add_stdio_server(name, command)
+        loaded: list[str] = []
+        for skill in client.get_tool_skills():
+            try:
+                self.registry.register(skill)
+                loaded.append(skill.name)
+            except ValueError:
+                self.registry.unregister(skill.name)
+                self.registry.register(skill)
+                loaded.append(skill.name)
+        return loaded
+
+    def connect_mcp_http(self, name: str, url: str) -> list[str]:
+        client = self.mcp_manager.add_http_server(name, url)
+        loaded: list[str] = []
+        for skill in client.get_tool_skills():
+            try:
+                self.registry.register(skill)
+                loaded.append(skill.name)
+            except ValueError:
+                self.registry.unregister(skill.name)
+                self.registry.register(skill)
+                loaded.append(skill.name)
+        return loaded
+
     def close(self):
+        self.mcp_manager.stop_all()
         self._session.close()
 
     def __enter__(self):

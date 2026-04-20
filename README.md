@@ -416,23 +416,24 @@ def execute(text: str = "", operation: str = "lowercase", **kwargs):
 
 #### 配置文件
 
-编辑项目根目录的 `mcp_config.json`：
+系统已预配置以下MCP服务器（修改 `mcp_config.json` 即可启用）：
 
 ```json
 {
   "mcpServers": {
-    "filesystem": {
-      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-    },
     "fetch": {
-      "command": ["npx", "-y", "@modelcontextprotocol/server-fetch"]
-    },
-    "custom_api": {
-      "url": "http://localhost:3001/mcp"
+      "command": ["uvx", "--from", "mcp-server-fetch", "mcp-server-fetch"],
+      "description": "Web fetcher - fetches URLs and extracts content as markdown"
     }
   }
 }
 ```
+
+> **注意**：使用 `uvx` 方式需要确保 `uv` 工具已安装（`pip install uv`）。也可使用 pip 安装：`pip install mcp-server-fetch`，然后将 `command` 改为 `["python", "-m", "mcp_server_fetch"]`。
+
+| MCP服务器 | 工具 | 说明 |
+|-----------|------|------|
+| `fetch` (mcp-server-fetch) | `fetch` | 抓取URL并提取为markdown格式，支持分块读取 |
 
 系统启动时自动连接配置中的 MCP 服务器，发现并注册其工具。连接失败的服务器会被跳过并打印警告。
 
@@ -450,7 +451,7 @@ curl -X POST http://127.0.0.1:8080/v1/mcp/connect \
 **聊天命令**：
 ```
 /mcp my_server http://localhost:3001/mcp
-/mcp filesystem npx -y @modelcontextprotocol/server-filesystem /tmp
+/mcp fetch uvx --from mcp-server-fetch mcp-server-fetch
 ```
 
 #### MCP 协议流程
@@ -537,7 +538,7 @@ POST /v1/mcp/connect
 ```json
 {
   "name": "server_name",
-  "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/path"],
+  "command": ["uvx", "--from", "mcp-server-fetch", "mcp-server-fetch"],
   "url": "http://localhost:3001/mcp"
 }
 ```
@@ -647,8 +648,8 @@ try:
     ])
     print(response["choices"][0]["message"]["content"])
 
-    # 动态连接 MCP 服务器
-    loaded = client.connect_mcp_http("my_server", "http://localhost:3001/mcp")
+    # 动态连接 MCP fetch 服务器
+    loaded = client.connect_mcp_stdio("fetch", ["uvx", "--from", "mcp-server-fetch", "mcp-server-fetch"])
     print(f"Loaded MCP tools: {loaded}")
 
     # 热加载 skill.md
@@ -680,7 +681,7 @@ curl -s -X POST http://127.0.0.1:8080/v1/skills/reload
 # 连接 MCP 服务器
 curl -s -X POST http://127.0.0.1:8080/v1/mcp/connect \
   -H "Content-Type: application/json" \
-  -d '{"name":"fs","command":["npx","-y","@modelcontextprotocol/server-filesystem","/tmp"]}'
+  -d '{"name":"fetch","command":["uvx","--from","mcp-server-fetch","mcp-server-fetch"]}'
 ```
 
 ---

@@ -1,3 +1,8 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "fetch": {
+      "command": ["uvx", "--from", "mcp-server-fetch", "mcp-server-fetch"],
+      "description": "Web content fetcher - fetches URLs and extracts content as markdown"
+    }
+  }
 }
